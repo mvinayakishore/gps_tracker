@@ -1,0 +1,4 @@
+-keep class com.gpstracker.telegram.** { *; }
+-keepclassmembers class com.gpstracker.telegram.** { *; }
+-dontwarn okhttp3.**
+-keep class okhttp3.** { *; }
