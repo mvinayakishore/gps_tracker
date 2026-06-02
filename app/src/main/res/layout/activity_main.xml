@@ -114,8 +114,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
-                app:boxStrokeColor="#444444"
-                app:boxStrokeColorStateList="@null">
+                app:boxStrokeColor="#444444">
 
                 <com.google.android.material.textfield.TextInputEditText
                     android:id="@+id/etBotToken"
@@ -146,8 +145,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
-                app:boxStrokeColor="#444444"
-                app:boxStrokeColorStateList="@null">
+                app:boxStrokeColor="#444444">
 
                 <com.google.android.material.textfield.TextInputEditText
                     android:id="@+id/etChatId"
