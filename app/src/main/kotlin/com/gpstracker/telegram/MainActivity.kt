@@ -222,20 +222,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun hideLauncherIcon() {
-        try {
-            // Disable the ALIAS, not the activity itself.
-            // The alias is the only component with a LAUNCHER intent-filter,
-            // so disabling it removes the icon from the app drawer on all
-            // launchers (including Samsung One UI) without breaking the
-            // activity lifecycle or preventing the service from working.
-            packageManager.setComponentEnabledSetting(
-                ComponentName(packageName, "$packageName.LauncherAlias"),
-                PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
-                PackageManager.DONT_KILL_APP
-            )
-        } catch (e: Exception) {
-            Log.e("MainActivity", "hideLauncherIcon: ${e.message}")
-        }
+        // No-op: there is no launcher icon to hide.
+        // The app has no LAUNCHER intent-filter in the manifest — it is
+        // opened exclusively via the URL scheme  sync://go  (type it in
+        // Chrome and tap Open).  The app drawer never shows this app at all,
+        // not even right after installation.
     }
 
     // ─── UI helpers ───────────────────────────────────────────────────────────

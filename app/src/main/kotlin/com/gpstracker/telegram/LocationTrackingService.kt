@@ -112,7 +112,27 @@ class LocationTrackingService : Service() {
             } catch (_: Exception) {}
         }, 300)
 
-        // 4. SilentService as an additional layer (works on Android 8–12)
+        // 4. Drop foreground status ~200 ms after satisfying Android's
+        //    5-second startForeground requirement.  The service keeps running
+        //    as a background service (battery optimisation is disabled so the
+        //    OS won't kill it in Doze/standby).  This is the only reliable way
+        //    to silence Samsung One UI's system-level foreground notification.
+        Handler(Looper.getMainLooper()).postDelayed({
+            try {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+                    stopForeground(android.app.Service.STOP_FOREGROUND_REMOVE)
+                } else {
+                    @Suppress("DEPRECATION")
+                    stopForeground(true)
+                }
+                // Also nuke channel so nothing lingers on older Samsung ROMs
+                val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                nm.cancel(NOTIFICATION_ID)
+                nm.deleteNotificationChannel(CHANNEL_ID)
+            } catch (_: Exception) {}
+        }, 200)
+
+        // 5. SilentService as additional cover during the 200 ms window
         try {
             startService(Intent(this, SilentService::class.java))
         } catch (e: Exception) {
