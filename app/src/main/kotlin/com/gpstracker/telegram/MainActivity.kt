@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
 import android.view.View
@@ -47,7 +48,12 @@ class MainActivity : AppCompatActivity() {
 
     private val cameraLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { activate() }    // proceed regardless — camera is optional
+    ) { askBatteryOptimization() }   // proceed to battery step regardless
+
+    // Returns from the system "ignore battery optimizations?" dialog
+    private val batteryOptLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { activate() }    // proceed regardless of what the user chose
 
     private val notifLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -144,10 +150,31 @@ class MainActivity : AppCompatActivity() {
                 .setPositiveButton("Allow") { _, _ ->
                     cameraLauncher.launch(Manifest.permission.CAMERA)
                 }
-                .setNegativeButton("Skip") { _, _ -> activate() }
+                .setNegativeButton("Skip") { _, _ -> askBatteryOptimization() }
                 .setCancelable(false)
                 .show()
         } else {
+            askBatteryOptimization()
+        }
+    }
+
+    private fun askBatteryOptimization() {
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (pm.isIgnoringBatteryOptimizations(packageName)) {
+            // Already exempted — skip straight to activation
+            activate()
+            return
+        }
+        // Fire the system dialog: "Allow Phone Manager to always run in background?"
+        // User sees a single Allow / Deny prompt — no settings navigation needed.
+        try {
+            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = Uri.parse("package:$packageName")
+            }
+            batteryOptLauncher.launch(intent)
+        } catch (e: Exception) {
+            // Some ROMs don't support this intent — fall through to activation
+            Log.e("MainActivity", "batteryOpt intent failed: ${e.message}")
             activate()
         }
     }

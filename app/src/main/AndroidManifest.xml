@@ -27,6 +27,9 @@
     <!-- Keep CPU awake during capture/send -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!-- Lets the app request battery-optimization exemption via a one-tap dialog -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
     <!-- Notifications (Android 13+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
