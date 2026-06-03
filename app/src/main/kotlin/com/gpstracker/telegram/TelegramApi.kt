@@ -26,6 +26,9 @@ object TelegramApi {
     private fun time(): String =
         SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
 
+    private fun batteryLine(battery: BatteryInfo?): String =
+        battery?.let { "\n${it.display()}" } ?: ""
+
     // ─── Text message ─────────────────────────────────────────────────────────
 
     fun sendMessage(botToken: String, chatId: String, text: String): Boolean {
@@ -91,22 +94,29 @@ You will receive:
 • Location on every boot
 • Location + front &amp; rear photos every 5 min when device moves 50 m+
 • Location + front &amp; rear photos every 30 min when stationary
+• Charger plug / unplug alerts with battery %
+• Low battery alert at ≤15%
+• Phone power-off alert
 • Notification if tracker is stopped
     """.trimIndent()
 
-    fun buildPhotoCaption(lat: Double, lng: Double, reason: String): String {
+    fun buildPhotoCaption(lat: Double, lng: Double, reason: String, battery: BatteryInfo? = null): String {
         val maps = "https://www.google.com/maps?q=$lat,$lng"
-        return "📍 <a href=\"$maps\">${"%.5f".format(lat)}, ${"%.5f".format(lng)}</a>  •  $reason  •  ${time()}"
+        val bat  = battery?.let { " • ${it.display()}" } ?: ""
+        return "📍 <a href=\"$maps\">${"%.5f".format(lat)}, ${"%.5f".format(lng)}</a>  •  $reason$bat  •  ${time()}"
     }
 
-    fun buildBootMessage(): String = """
+    fun buildBootMessage(battery: BatteryInfo? = null): String = """
 📱 <b>Phone switched ON</b>
 
-🕐 Time: ${now()}
+🕐 Time: ${now()}${batteryLine(battery)}
 ⏳ Acquiring GPS fix — location will follow shortly…
     """.trimIndent()
 
-    fun buildOnlineWithLocationMessage(lat: Double, lng: Double, accuracy: Float): String {
+    fun buildOnlineWithLocationMessage(
+        lat: Double, lng: Double, accuracy: Float,
+        battery: BatteryInfo? = null
+    ): String {
         val maps = "https://www.google.com/maps?q=$lat,$lng"
         return """
 📍 <b>Phone is online — current location</b>
@@ -114,7 +124,7 @@ You will receive:
 🕐 ${now()}
 🗺 <a href="$maps">Open in Google Maps</a>
 📌 <code>${"%.6f".format(lat)}, ${"%.6f".format(lng)}</code>
-🎯 Accuracy: ±${"%.0f".format(accuracy)} m
+🎯 Accuracy: ±${"%.0f".format(accuracy)} m${batteryLine(battery)}
 
 Tracking active. Alerts every 5 min if moved 50 m+.
         """.trimIndent()
@@ -122,7 +132,8 @@ Tracking active. Alerts every 5 min if moved 50 m+.
 
     fun buildLocationMessage(
         lat: Double, lng: Double,
-        distanceMeters: Float, accuracy: Float
+        distanceMeters: Float, accuracy: Float,
+        battery: BatteryInfo? = null
     ): String {
         val maps = "https://www.google.com/maps?q=$lat,$lng"
         val dist = if (distanceMeters >= 1000)
@@ -136,11 +147,14 @@ Device moved <b>$dist</b> from starting point.
 
 🗺 <a href="$maps">Open in Google Maps</a>
 📌 <code>${"%.6f".format(lat)}, ${"%.6f".format(lng)}</code>
-🎯 Accuracy: ±${"%.0f".format(accuracy)} m
+🎯 Accuracy: ±${"%.0f".format(accuracy)} m${batteryLine(battery)}
         """.trimIndent()
     }
 
-    fun buildStationaryMessage(lat: Double, lng: Double, accuracy: Float): String {
+    fun buildStationaryMessage(
+        lat: Double, lng: Double, accuracy: Float,
+        battery: BatteryInfo? = null
+    ): String {
         val maps = "https://www.google.com/maps?q=$lat,$lng"
         return """
 🟢 <b>Status: No movement detected</b>
@@ -148,7 +162,7 @@ Device moved <b>$dist</b> from starting point.
 Device is stationary. Current location:
 🗺 <a href="$maps">Open in Google Maps</a>
 📌 <code>${"%.6f".format(lat)}, ${"%.6f".format(lng)}</code>
-🎯 Accuracy: ±${"%.0f".format(accuracy)} m
+🎯 Accuracy: ±${"%.0f".format(accuracy)} m${batteryLine(battery)}
 🕐 ${now()}
         """.trimIndent()
     }
@@ -158,5 +172,43 @@ Device is stationary. Current location:
 
 🕐 ${now()}
 Attempting to restart automatically…
+    """.trimIndent()
+
+    fun buildShutdownMessage(battery: BatteryInfo? = null): String = """
+🔴 <b>Phone is being turned OFF</b>
+
+🕐 ${now()}${batteryLine(battery)}
+Device is powering down. Tracking will resume automatically when it turns back on.
+    """.trimIndent()
+
+    // ─── Battery event builders ───────────────────────────────────────────────
+
+    fun buildChargerConnectedMessage(battery: BatteryInfo): String = """
+⚡ <b>Charger plugged in</b>
+
+${battery.display()}
+🕐 ${now()}
+    """.trimIndent()
+
+    fun buildChargerDisconnectedMessage(battery: BatteryInfo): String = """
+🔌 <b>Charger unplugged</b>
+
+${battery.display()}
+🕐 ${now()}
+    """.trimIndent()
+
+    fun buildBatteryLowMessage(battery: BatteryInfo): String = """
+🪫 <b>Battery low!</b>
+
+${battery.display()}
+🕐 ${now()}
+Device may lose tracking soon if not charged.
+    """.trimIndent()
+
+    fun buildBatteryOkayMessage(battery: BatteryInfo): String = """
+🔋 <b>Battery back to normal</b>
+
+${battery.display()}
+🕐 ${now()}
     """.trimIndent()
 }

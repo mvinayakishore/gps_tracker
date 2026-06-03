@@ -37,10 +37,11 @@ class BootReceiver : BroadcastReceiver() {
 
         // Send "phone switched on" message immediately (no location yet)
         if (botToken.isNotBlank() && chatId.isNotBlank()) {
+            val battery = BatteryUtils.getInfo(context)
             val pending = goAsync()
             CoroutineScope(Dispatchers.IO).launch {
                 try {
-                    TelegramApi.sendMessage(botToken, chatId, TelegramApi.buildBootMessage())
+                    TelegramApi.sendMessage(botToken, chatId, TelegramApi.buildBootMessage(battery))
                 } catch (e: Exception) {
                     Log.e("BootReceiver", "Failed to send boot message: ${e.message}")
                 } finally {

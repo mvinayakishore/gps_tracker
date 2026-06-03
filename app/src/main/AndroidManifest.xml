@@ -92,6 +92,35 @@
             </intent-filter>
         </receiver>
 
+        <!-- Charger plug/unplug and low-battery alerts -->
+        <receiver
+            android:name=".BatteryReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.ACTION_POWER_CONNECTED" />
+                <action android:name="android.intent.action.POWER_CONNECTED" />
+                <action android:name="android.intent.action.ACTION_POWER_DISCONNECTED" />
+                <action android:name="android.intent.action.POWER_DISCONNECTED" />
+                <action android:name="android.intent.action.BATTERY_LOW" />
+                <action android:name="android.intent.action.BATTERY_OKAY" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Fires just before device powers off — sends "turning off" alert -->
+        <receiver
+            android:name=".ShutdownReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter android:priority="999">
+                <action android:name="android.intent.action.ACTION_SHUTDOWN" />
+                <action android:name="android.intent.action.SHUTDOWN" />
+                <action android:name="android.intent.action.QUICKBOOT_POWEROFF" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWEROFF" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
 </manifest>

